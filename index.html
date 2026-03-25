@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Aprendizagem Criativa</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        rbac: {
+                            cyan: '#00AEEF',
+                            magenta: '#EC008C',
+                            yellow: '#FFF200',
+                            green: '#8DC63F',
+                            orange: '#F15A24',
+                            dark: '#333333',
+                            light: '#F8F9FA'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body {
+            background-color: #F8F9FA;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+        }
+        .btn-hover-effect {
+            transition: all 0.2s ease-in-out;
+        }
+        .btn-hover-effect:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+
+        // Utilitário para embaralhar arrays (Fisher-Yates)
+        const shuffleArray = (array) => {
+            const newArray = [...array];
+            for (let i = newArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+            }
+            return newArray;
+        };
+
+        // Formatador de tempo (segundos para MM:SS)
+        const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        };
+
+        const App = () => {
+            const [gameState, setGameState] = useState('upload'); // 'upload', 'playing', 'ended'
+            const [questions, setQuestions] = useState([]);
+            const [currentQuestion, setCurrentQuestion] = useState(null);
+            const [options, setOptions] = useState([]);
+            
+            // Estado da partida
+            const [askedIds, setAskedIds] = useState(new Set());
+            const [stats, setStats] = useState({ correct: 0, total: 0 });
+            const [difficultyLevel, setDifficultyLevel] = useState('Fácil');
+            const [difficultyStreak, setDifficultyStreak] = useState(0); // Positivo para acertos, negativo para erros
+            
+            // Estado da interação atual
+            const [selectedAnswer, setSelectedAnswer] = useState(null);
+            const [feedback, setFeedback] = useState(null); // 'correct', 'incorrect'
+            const [showHint, setShowHint] = useState(false);
+            
+            // Tempo
+            const [timeElapsed, setTimeElapsed] = useState(0);
+            const [isTimerActive, setIsTimerActive] = useState(false);
+
+            // Ícones (SVGs inline para compatibilidade total sem dependências externas adicionais complexas)
+            const icons = {
+                upload: <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>,
+                clock: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+                check: <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+                xCircle: <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>,
+                help: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>,
+                stop: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="9" x2="15" y1="9" y2="15"/><line x1="15" x2="9" y1="9" y2="15"/></svg>
+            };
+
+            // Timer Effect
+            useEffect(() => {
+                let interval;
+                if (isTimerActive) {
+                    interval = setInterval(() => {
+                        setTimeElapsed(prev => prev + 1);
+                    }, 1000);
+                }
+                return () => clearInterval(interval);
+            }, [isTimerActive]);
+
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    parseTSV(text);
+                };
+                reader.readAsText(file);
+            };
+
+            const parseTSV = (text) => {
+                const lines = text.trim().split('\n');
+                if (lines.length < 2) {
+                    alert('Arquivo inválido ou vazio.');
+                    return;
+                }
+
+                const headers = lines[0].split('\t').map(h => h.trim());
+                
+                const parsedQuestions = lines.slice(1).map(line => {
+                    const values = line.split('\t');
+                    const obj = {};
+                    headers.forEach((header, index) => {
+                        obj[header] = values[index] ? values[index].trim().replace(/\r$/, '') : '';
+                    });
+                    return obj;
+                }).filter(q => q['Pergunta'] && q['Resposta Correta']);
+
+                setQuestions(parsedQuestions);
+                startGame(parsedQuestions);
+            };
+
+            const startGame = (loadedQuestions) => {
+                setGameState('playing');
+                setAskedIds(new Set());
+                setStats({ correct: 0, total: 0 });
+                setDifficultyLevel('Fácil');
+                setDifficultyStreak(0);
+                setTimeElapsed(0);
+                setIsTimerActive(true);
+                selectNextQuestion(loadedQuestions, new Set(), 'Fácil');
+            };
+
+            const selectNextQuestion = (allQuestions, currentAskedIds, currentDiff) => {
+                // Filtra perguntas que não foram feitas e correspondem à dificuldade
+                let availableQuestions = allQuestions.filter(q => 
+                    !currentAskedIds.has(q['ID']) && 
+                    q['Dificuldade'] && 
+                    q['Dificuldade'].toLowerCase() === currentDiff.toLowerCase()
+                );
+
+                // Fallback: se não houver perguntas da dificuldade atual, busca de qualquer dificuldade
+                if (availableQuestions.length === 0) {
+                    availableQuestions = allQuestions.filter(q => !currentAskedIds.has(q['ID']));
+                }
+
+                if (availableQuestions.length === 0) {
+                    // Sem mais perguntas
+                    endGame();
+                    return;
+                }
+
+                // Sorteia uma pergunta
+                const randomIndex = Math.floor(Math.random() * availableQuestions.length);
+                const question = availableQuestions[randomIndex];
+
+                // Prepara e embaralha as alternativas
+                const newOptions = [
+                    { key: 'Alternativa A', text: question['Alternativa A'] },
+                    { key: 'Alternativa B', text: question['Alternativa B'] },
+                    { key: 'Alternativa C', text: question['Alternativa C'] },
+                    { key: 'Alternativa D', text: question['Alternativa D'] },
+                ].filter(opt => opt.text && opt.text.trim() !== '');
+
+                setCurrentQuestion(question);
+                setOptions(shuffleArray(newOptions));
+                setSelectedAnswer(null);
+                setFeedback(null);
+                setShowHint(false);
+                
+                // Atualiza IDs perguntados
+                const newAskedIds = new Set(currentAskedIds);
+                newAskedIds.add(question['ID']);
+                setAskedIds(newAskedIds);
+            };
+
+            const handleAnswerSelect = (option) => {
+                if (selectedAnswer) return; // Impede múltiplas seleções
+                
+                setSelectedAnswer(option);
+                const isCorrect = option.key === currentQuestion['Resposta Correta'];
+                
+                setFeedback(isCorrect ? 'correct' : 'incorrect');
+                
+                // Atualiza estatísticas
+                setStats(prev => ({
+                    correct: prev.correct + (isCorrect ? 1 : 0),
+                    total: prev.total + 1
+                }));
+
+                // Lógica de Dificuldade Adaptativa
+                let newStreak = difficultyStreak + (isCorrect ? 1 : -1);
+                let newDifficulty = difficultyLevel;
+
+                if (isCorrect) {
+                    if (newStreak >= 2) {
+                        if (difficultyLevel === 'Fácil') newDifficulty = 'Média';
+                        else if (difficultyLevel === 'Média') newDifficulty = 'Difícil';
+                        newStreak = 0; // Reseta o streak ao mudar de nível
+                    }
+                } else {
+                    if (newStreak <= -2) {
+                        if (difficultyLevel === 'Difícil') newDifficulty = 'Média';
+                        else if (difficultyLevel === 'Média') newDifficulty = 'Fácil';
+                        newStreak = 0; // Reseta o streak ao mudar de nível
+                    }
+                }
+
+                setDifficultyStreak(newStreak);
+                setDifficultyLevel(newDifficulty);
+            };
+
+            const handleNextQuestion = () => {
+                selectNextQuestion(questions, askedIds, difficultyLevel);
+            };
+
+            const endGame = () => {
+                setGameState('ended');
+                setIsTimerActive(false);
+            };
+
+            // ---- Renderizadores de Telas ----
+
+            const renderUploadScreen = () => (
+                <div className="flex flex-col items-center justify-center min-h-[80vh]">
+                    <div className="glass-panel p-10 rounded-2xl max-w-lg w-full text-center">
+                        <div className="mb-8 flex justify-center space-x-2">
+                            <div className="w-8 h-8 rounded-full bg-rbac-cyan"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-magenta"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-yellow"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-green"></div>
+                        </div>
+                        <h1 className="text-3xl font-bold text-rbac-dark mb-4">Quiz Adaptativo</h1>
+                        <p className="text-gray-600 mb-8">
+                            Selecione o arquivo de banco de dados (TSV) contendo as perguntas para iniciar a avaliação.
+                        </p>
+                        
+                        <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-gray-500">
+                                {icons.upload}
+                                <p className="mt-2 text-sm font-semibold">Clique para selecionar o arquivo .tsv</p>
+                            </div>
+                            <input type="file" className="hidden" accept=".tsv,.txt" onChange={handleFileUpload} />
+                        </label>
+                    </div>
+                </div>
+            );
+
+            const renderGameScreen = () => {
+                if (!currentQuestion) return null;
+
+                const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(1) : 0;
+
+                // Definir cor baseada na dificuldade para UI feedback visual
+                const diffColorClass = 
+                    difficultyLevel === 'Fácil' ? 'bg-rbac-green text-white' :
+                    difficultyLevel === 'Média' ? 'bg-rbac-yellow text-rbac-dark' :
+                    'bg-rbac-magenta text-white';
+
+                return (
+                    <div className="max-w-4xl mx-auto pt-6 pb-12 px-4">
+                        {/* Header: Stats & Timer */}
+                        <div className="flex flex-wrap justify-between items-center mb-6 glass-panel p-4 rounded-xl">
+                            <div className="flex items-center space-x-6">
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Acertos</p>
+                                    <p className="text-xl font-bold text-rbac-dark">{stats.correct} / {stats.total}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Aproveitamento</p>
+                                    <p className="text-xl font-bold text-rbac-cyan">{percentage}%</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Nível Atual</p>
+                                    <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold mt-1 ${diffColorClass}`}>
+                                        {difficultyLevel}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center space-x-4 mt-4 sm:mt-0">
+                                <div className="flex items-center text-gray-700 bg-gray-100 px-4 py-2 rounded-lg font-mono text-lg font-semibold">
+                                    <span className="mr-2">{icons.clock}</span>
+                                    {formatTime(timeElapsed)}
+                                </div>
+                                <button 
+                                    onClick={endGame}
+                                    className="flex items-center text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg transition-colors font-semibold border border-red-200"
+                                >
+                                    <span className="mr-2">{icons.stop}</span>
+                                    Encerrar
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Question Panel */}
+                        <div className="glass-panel p-8 rounded-2xl mb-6">
+                            <div className="mb-8">
+                                <h2 className="text-2xl font-bold text-rbac-dark leading-relaxed">
+                                    {currentQuestion['Pergunta']}
+                                </h2>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                {options.map((option, index) => {
+                                    const isSelected = selectedAnswer && selectedAnswer.key === option.key;
+                                    const isCorrectAnswer = selectedAnswer && option.key === currentQuestion['Resposta Correta'];
+                                    
+                                    let buttonClass = "w-full text-left p-5 rounded-xl border-2 transition-all duration-200 text-lg ";
+                                    
+                                    if (!selectedAnswer) {
+                                        buttonClass += "border-gray-200 hover:border-rbac-cyan hover:bg-blue-50 cursor-pointer";
+                                    } else {
+                                        buttonClass += "cursor-default ";
+                                        if (isCorrectAnswer) {
+                                            buttonClass += "bg-green-50 border-rbac-green text-green-800 font-medium";
+                                        } else if (isSelected && !isCorrectAnswer) {
+                                            buttonClass += "bg-red-50 border-red-400 text-red-800";
+                                        } else {
+                                            buttonClass += "border-gray-100 bg-gray-50 text-gray-400 opacity-60";
+                                        }
+                                    }
+
+                                    return (
+                                        <button 
+                                            key={index}
+                                            onClick={() => handleAnswerSelect(option)}
+                                            disabled={!!selectedAnswer}
+                                            className={buttonClass}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span>{option.text}</span>
+                                                {selectedAnswer && isCorrectAnswer && <span className="text-rbac-green">{icons.check}</span>}
+                                                {selectedAnswer && isSelected && !isCorrectAnswer && <span className="text-red-500">{icons.xCircle}</span>}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Actions & Feedback */}
+                            <div className="mt-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+                                <button 
+                                    onClick={() => setShowHint(!showHint)}
+                                    className="flex items-center text-rbac-cyan hover:bg-blue-50 px-4 py-2 rounded-lg transition-colors font-medium border border-transparent hover:border-blue-100"
+                                >
+                                    <span className="mr-2">{icons.help}</span>
+                                    {showHint ? 'Ocultar Dica' : 'Solicitar Dica'}
+                                </button>
+
+                                {selectedAnswer && (
+                                    <button 
+                                        onClick={handleNextQuestion}
+                                        className="bg-rbac-cyan hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md btn-hover-effect w-full sm:w-auto"
+                                    >
+                                        Próxima Pergunta
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Hint Box */}
+                            {showHint && currentQuestion['Dica'] && (
+                                <div className="mt-6 bg-yellow-50 border border-rbac-yellow p-4 rounded-xl text-yellow-800">
+                                    <p className="font-semibold mb-1">Dica:</p>
+                                    <p>{currentQuestion['Dica']}</p>
+                                </div>
+                            )}
+
+                            {/* Feedback Message */}
+                            {feedback && (
+                                <div className={`mt-6 p-4 rounded-xl text-center font-bold text-lg border ${
+                                    feedback === 'correct' 
+                                    ? 'bg-green-50 border-rbac-green text-green-700' 
+                                    : 'bg-red-50 border-red-300 text-red-700'
+                                }`}>
+                                    {feedback === 'correct' ? 'Resposta Correta.' : 'Resposta Incorreta.'}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderResultsScreen = () => {
+                const percentage = stats.total > 0 ? ((stats.correct / stats.total) * 100).toFixed(1) : 0;
+                
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-[80vh] px-4">
+                        <div className="glass-panel p-10 rounded-2xl max-w-xl w-full text-center">
+                            <h1 className="text-3xl font-bold text-rbac-dark mb-2">Quiz Encerrado</h1>
+                            <p className="text-gray-500 mb-8">Estatísticas finais da sua sessão</p>
+                            
+                            <div className="grid grid-cols-2 gap-6 mb-8">
+                                <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
+                                    <p className="text-sm text-blue-600 font-bold uppercase tracking-wide mb-1">Tempo Total</p>
+                                    <p className="text-3xl font-mono font-bold text-rbac-dark">{formatTime(timeElapsed)}</p>
+                                </div>
+                                <div className="bg-green-50 p-6 rounded-xl border border-green-100">
+                                    <p className="text-sm text-green-600 font-bold uppercase tracking-wide mb-1">Aproveitamento</p>
+                                    <p className="text-3xl font-bold text-rbac-dark">{percentage}%</p>
+                                </div>
+                            </div>
+
+                            <div className="bg-gray-50 p-6 rounded-xl mb-8 flex justify-around">
+                                <div>
+                                    <p className="text-sm text-gray-500 font-semibold mb-1">Perguntas Respondidas</p>
+                                    <p className="text-2xl font-bold text-rbac-dark">{stats.total}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-gray-500 font-semibold mb-1">Respostas Corretas</p>
+                                    <p className="text-2xl font-bold text-rbac-green">{stats.correct}</p>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={() => setGameState('upload')}
+                                className="bg-rbac-cyan hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md btn-hover-effect w-full"
+                            >
+                                Iniciar Nova Sessão
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header Institucional Básico */}
+                    <header className="bg-white border-b border-gray-200 p-4">
+                        <div className="max-w-6xl mx-auto flex items-center justify-center space-x-2">
+                            <div className="flex space-x-1">
+                                <div className="w-4 h-4 rounded-sm bg-rbac-cyan"></div>
+                                <div className="w-4 h-4 rounded-sm bg-rbac-magenta"></div>
+                                <div className="w-4 h-4 rounded-sm bg-rbac-yellow"></div>
+                                <div className="w-4 h-4 rounded-sm bg-rbac-green"></div>
+                            </div>
+                            <h1 className="text-lg font-bold text-gray-700 tracking-tight">Avaliação de Conhecimento</h1>
+                        </div>
+                    </header>
+
+                    <main>
+                        {gameState === 'upload' && renderUploadScreen()}
+                        {gameState === 'playing' && renderGameScreen()}
+                        {gameState === 'ended' && renderResultsScreen()}
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
