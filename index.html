@@ -95,7 +95,8 @@
         };
 
         const App = () => {
-            const [gameState, setGameState] = useState('loading'); // 'loading', 'upload', 'playing', 'ended'
+            const [gameState, setGameState] = useState('loading'); // 'loading', 'menu', 'upload', 'playing', 'ended'
+            const [availableQuizzes, setAvailableQuizzes] = useState([]);
             const [questions, setQuestions] = useState([]);
             const [currentQuestion, setCurrentQuestion] = useState(null);
             const [options, setOptions] = useState([]);
@@ -114,6 +115,12 @@
             // Tempo
             const [timeElapsed, setTimeElapsed] = useState(0);
             const [isTimerActive, setIsTimerActive] = useState(false);
+
+            const quizOptionsList = useMemo(() => [
+                { id: 'opt1', title: 'Perguntas sobre Aprendizagem Criativa e Construcionismo', file: 'quiz_50geral.tsv' },
+                { id: 'opt2', title: 'Perguntas sobre o Livro Jardim da Infância para a Vida Toda de Mitchel Resnick', file: 'quiz_50livro.tsv' },
+                { id: 'opt3', title: 'Perguntas gerais sobre Aprendizagem Criativa e temas relacionados', file: 'quiz_500geral.tsv' }
+            ], []);
 
             // Ícones (SVGs inline para compatibilidade total sem dependências externas adicionais complexas)
             const icons = {
@@ -137,14 +144,22 @@
                 return () => clearInterval(interval);
             }, [isTimerActive]);
 
-            // Carregamento automático do banco de dados local
+            // Verificação dos arquivos locais de banco de dados
             useEffect(() => {
-                const loadLocalDatabase = async () => {
+                const verifyFiles = async () => {
                     try {
-                        const response = await fetch('./quiz.tsv');
-                        if (response.ok) {
-                            const text = await response.text();
-                            parseTSV(text, true);
+                        const checks = await Promise.all(quizOptionsList.map(async (q) => {
+                            try {
+                                const res = await fetch('./' + q.file, { method: 'HEAD' });
+                                return { ...q, available: res.ok };
+                            } catch (e) {
+                                return { ...q, available: false };
+                            }
+                        }));
+                        const availableQuizzesFiltered = checks.filter(c => c.available);
+                        if (availableQuizzesFiltered.length > 0) {
+                            setAvailableQuizzes(availableQuizzesFiltered);
+                            setGameState('menu');
                         } else {
                             setGameState('upload');
                         }
@@ -154,8 +169,20 @@
                 };
                 
                 if (gameState === 'loading') {
-                    loadLocalDatabase();
+                    verifyFiles();
                 }
+            }, [gameState, quizOptionsList]);
+
+            // Listener para a barra de espaço na tela de menu
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if (gameState === 'menu' && e.code === 'Space') {
+                        e.preventDefault();
+                        setGameState('upload');
+                    }
+                };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
             }, [gameState]);
 
             const handleFileUpload = (event) => {
@@ -164,18 +191,38 @@
 
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    const text = e.target.result;
-                    parseTSV(text, false);
+                    try {
+                        const text = e.target.result;
+                        const parsedQuestions = parseTSV(text);
+                        setQuestions(parsedQuestions);
+                        startGame(parsedQuestions);
+                    } catch (error) {
+                        alert(error.message);
+                    }
                 };
                 reader.readAsText(file);
             };
 
-            const parseTSV = (text, isAutoLoad = false) => {
+            const handleSelectQuiz = async (filename) => {
+                try {
+                    const response = await fetch('./' + filename);
+                    if (response.ok) {
+                        const text = await response.text();
+                        const parsedQuestions = parseTSV(text);
+                        setQuestions(parsedQuestions);
+                        startGame(parsedQuestions);
+                    } else {
+                        alert('Erro ao carregar o arquivo selecionado.');
+                    }
+                } catch (error) {
+                    alert('Erro de conexão ao tentar carregar o arquivo.');
+                }
+            };
+
+            const parseTSV = (text) => {
                 const lines = text.trim().split('\n');
                 if (lines.length < 2) {
-                    if (!isAutoLoad) alert('Arquivo inválido ou vazio.');
-                    if (isAutoLoad) setGameState('upload');
-                    return;
+                    throw new Error('Arquivo inválido ou vazio.');
                 }
 
                 const headers = lines[0].split('\t').map(h => h.trim());
@@ -190,13 +237,10 @@
                 }).filter(q => q['Pergunta'] && q['Resposta Correta']);
 
                 if (parsedQuestions.length === 0) {
-                    if (!isAutoLoad) alert('Nenhuma pergunta válida encontrada no arquivo.');
-                    if (isAutoLoad) setGameState('upload');
-                    return;
+                    throw new Error('Nenhuma pergunta válida encontrada no arquivo.');
                 }
 
-                setQuestions(parsedQuestions);
-                startGame(parsedQuestions);
+                return parsedQuestions;
             };
 
             const startGame = (loadedQuestions) => {
@@ -306,8 +350,42 @@
                         <div className="text-rbac-cyan mb-6 w-12 h-12">
                             {icons.loader}
                         </div>
-                        <h2 className="text-xl font-bold text-rbac-dark">Buscando banco de dados local...</h2>
-                        <p className="text-sm text-gray-500 mt-2">Procurando por quiz.tsv no diretório raiz</p>
+                        <h2 className="text-xl font-bold text-rbac-dark">Verificando banco de dados locais...</h2>
+                        <p className="text-sm text-gray-500 mt-2">Buscando os módulos padrão de perguntas</p>
+                    </div>
+                </div>
+            );
+
+            const renderMenuScreen = () => (
+                <div className="flex flex-col items-center justify-center min-h-[80vh] px-4">
+                    <div className="glass-panel p-10 rounded-2xl max-w-2xl w-full text-center">
+                        <div className="mb-8 flex justify-center space-x-2">
+                            <div className="w-8 h-8 rounded-full bg-rbac-cyan"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-magenta"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-yellow"></div>
+                            <div className="w-8 h-8 rounded-full bg-rbac-green"></div>
+                        </div>
+                        <h1 className="text-3xl font-bold text-rbac-dark mb-4">Selecione o Módulo</h1>
+                        <p className="text-gray-600 mb-8">
+                            Escolha um dos questionários disponíveis abaixo para iniciar a avaliação.
+                        </p>
+
+                        <div className="space-y-4 mb-8">
+                            {availableQuizzes.map((quiz) => (
+                                <button
+                                    key={quiz.id}
+                                    onClick={() => handleSelectQuiz(quiz.file)}
+                                    className="w-full bg-white border border-gray-200 hover:border-rbac-cyan hover:bg-blue-50 text-left p-4 rounded-xl transition-all duration-200 shadow-sm btn-hover-effect flex items-center"
+                                >
+                                    <span className="text-rbac-cyan mr-4">{icons.check}</span>
+                                    <span className="font-semibold text-gray-800">{quiz.title}</span>
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg border border-gray-100">
+                            Pressione a <strong className="text-gray-700">Barra de Espaço</strong> para enviar um arquivo de banco de dados personalizado.
+                        </div>
                     </div>
                 </div>
             );
@@ -504,7 +582,13 @@
                             </div>
 
                             <button 
-                                onClick={() => setGameState('upload')}
+                                onClick={() => {
+                                    if (availableQuizzes.length > 0) {
+                                        setGameState('menu');
+                                    } else {
+                                        setGameState('upload');
+                                    }
+                                }}
                                 className="bg-rbac-cyan hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md btn-hover-effect w-full"
                             >
                                 Iniciar Nova Sessão
@@ -531,6 +615,7 @@
 
                     <main>
                         {gameState === 'loading' && renderLoadingScreen()}
+                        {gameState === 'menu' && renderMenuScreen()}
                         {gameState === 'upload' && renderUploadScreen()}
                         {gameState === 'playing' && renderGameScreen()}
                         {gameState === 'ended' && renderResultsScreen()}
